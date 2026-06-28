@@ -91,13 +91,19 @@ let expandedOrderId = null;
     initPage(user);
 })();
 
-function initPage(user) {
+async function initPage(user) {
     setupSidebar();
     document.getElementById('logout-btn').addEventListener('click', logout);
     document.getElementById('status-filter').addEventListener('change', renderOrders);
 
-    loadRiders();
-    loadOrders();
+    //Tell Javascript to pause and wait for both to reach 100%
+    await Promise.all([
+        loadRiders(),
+        loadOrders()
+    ]);
+
+    //Only render the HTML when we know we have all the data
+    renderOrders();
 }
 
 function setupSidebar() {
@@ -120,7 +126,6 @@ async function loadOrders() {
     const body = document.getElementById('orders-body');
     try {
         allOrders = await apiFetch('/orders/index.php');
-        renderOrders();
     } catch {
         body.innerHTML = `<tr><td colspan="7">
             <div class="empty-state">
