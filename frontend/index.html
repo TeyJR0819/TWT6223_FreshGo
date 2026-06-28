@@ -141,7 +141,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
         sessionStorage.setItem('user', JSON.stringify(user));
         showToast(`Welcome back, ${user.name}!`, 'success');
         setTimeout(() => redirectForRole(user.role), 600);
-    } catch {
+    } catch (err){
         setButtonLoading(btn, false);
         showToast(err.message, 'error');
     }
@@ -179,7 +179,7 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
         sessionStorage.setItem('user', JSON.stringify(user));
         showToast(`Welcome, ${user.name}! Account created.`, 'success');
         setTimeout(() => redirectForRole(user.role), 600);
-    } catch {
+    } catch (err){
         setButtonLoading(btn, false);
         showToast(err.message, 'error');
     }
