@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Orders — FreshGo</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/pages/customer.css">
+</head>
+<body>
+
+<header class="topnav">
+    <div class="topnav__inner">
+        <div class="topnav__brand">🍜 FreshGo</div>
+        <nav class="topnav__links">
+            <a class="topnav__link" href="menu.html">Menu</a>
+            <a class="topnav__link" href="cart.html" style="position:relative;">
+                Cart
+                <span class="cart-badge" id="cart-badge" style="display:none;">0</span>
+            </a>
+            <a class="topnav__link is-active" href="track.html">My Orders</a>
+            <button class="btn btn--ghost btn--sm" id="logout-btn">Log Out</button>
+        </nav>
+    </div>
+</header>
+
+<div class="page-wrap">
+    <div class="page-intro">
+        <h1>My Orders</h1>
+        <p class="text-muted">Track the live status of your orders.</p>
+    </div>
+
+    <div id="orders-container">
+        <div class="loading-block"><span class="spinner spinner--dark"></span> Loading your orders...</div>
+    </div>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/cart.js"></script>
+<script>
+const STATUS_STEPS = ['pending', 'preparing', 'out_for_delivery', 'delivered'];
+const STATUS_STEP_LABELS = { pending: 'Pending', preparing: 'Preparing', out_for_delivery: 'Out for Delivery', delivered: 'Delivered' };
+
+let orders = [];
+let expandedOrderId = null;
+
+(async () => {
+    const user = await sessionGuard('customer');
+    if (!user) return;
+    initPage(user);
+})();
+
+function initPage(user) {
+    document.getElementById('logout-btn').addEventListener('click', logout);
+    updateCartBadge();
+    loadOrders();
+    setInterval(loadOrders, 20000);
+}
+
+async function loadOrders() {
+    const container = document.getElementById('orders-container');
+    try {
+        orders = await apiFetch('/orders/my.php');
+        renderOrders();
+    } catch {
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-state__icon">⚠️</div>
+            <div class="empty-state__title">Couldn't load your orders</div>
+            <div class="empty-state__text">Please try again shortly.</div>
+        </div>`;
+    }
+}
+
+function renderOrders() {
+    const container = document.getElementById('orders-container');
+
+    if (orders.length === 0) {
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-state__icon">🧾</div>
+            <div class="empty-state__title">No orders yet</div>
+            <div class="empty-state__text">Visit the <a href="menu.html">menu</a> to place your first order.</div>
+        </div>`;
+        return;
+    }
+
+    container.innerHTML = orders.map(o => `
+        <div class="order-card ${o.status === 'cancelled' ? 'is-cancelled' : ''} ${expandedOrderId === o.id ? 'is-expanded' : ''}" data-order-card="${o.id}">
+            <div class="order-card__top">
+                <div>
+                    <div class="order-card__id">Order #${o.id}</div>
+                    <div class="order-card__meta">${o.item_count} item${o.item_count != 1 ? 's' : ''} · ${formatPrice(o.total_price)} · ${formatDate(o.created_at)}</div>
+                    ${o.rider_name ? `<div class="order-card__meta">Rider: ${escapeHtml(o.rider_name)}</div>` : ''}
+                </div>
+                ${statusBadge(o.status)}
+            </div>
+            ${renderProgress(o.status)}
+            <div class="order-card__detail" id="order-card-detail-${o.id}">
+                ${expandedOrderId === o.id ? '<div class="loading-block"><span class="spinner spinner--dark"></span> Loading items...</div>' : ''}
+            </div>
+        </div>
+    `).join('');
+
+    container.querySelectorAll('[data-order-card]').forEach(card => {
+        card.addEventListener('click', () => {
+            const id = parseInt(card.dataset.orderCard, 10);
+            expandedOrderId = expandedOrderId === id ? null : id;
+            renderOrders();
+        });
+    });
+
+    if (expandedOrderId !== null && orders.some(o => o.id === expandedOrderId)) {
+        loadOrderDetail(expandedOrderId);
+    }
+}
+
+function renderProgress(status) {
+    if (status === 'cancelled') {
+        return `<div class="progress-track is-cancelled">
+            <div class="progress-step is-current">
+                <div class="progress-step__dot">✕</div>
+                <div class="progress-step__label">Order Cancelled</div>
+            </div>
+        </div>`;
+    }
+
+    const currentIndex = STATUS_STEPS.indexOf(status);
+    return `<div class="progress-track">
+        ${STATUS_STEPS.map((s, i) => {
+            let cls = '';
+            if (i < currentIndex) cls = 'is-complete';
+            else if (i === currentIndex) cls = 'is-current';
+            return `<div class="progress-step ${cls}">
+                <div class="progress-step__line"></div>
+                <div class="progress-step__dot">${i < currentIndex ? '✓' : i + 1}</div>
+                <div class="progress-step__label">${STATUS_STEP_LABELS[s]}</div>
+            </div>`;
+        }).join('')}
+    </div>`;
+}
+
+async function loadOrderDetail(orderId) {
+    const container = document.getElementById(`order-card-detail-${orderId}`);
+    if (!container) return;
+    try {
+        const order = await apiFetch(`/orders/item.php?id=${orderId}`);
+        container.innerHTML = `
+            <p style="margin-bottom:10px;"><strong>Delivery Address:</strong> ${escapeHtml(order.delivery_address)}</p>
+            ${order.notes ? `<p style="margin-bottom:10px;"><strong>Notes:</strong> ${escapeHtml(order.notes)}</p>` : ''}
+            <ul class="order-card__items">
+                ${order.items.map(it => `
+                    <li><span>${escapeHtml(it.item_name)} × ${it.quantity}</span><span>${formatPrice(it.unit_price * it.quantity)}</span></li>
+                `).join('')}
+            </ul>
+        `;
+    } catch {
+        container.innerHTML = `<p class="text-danger">Couldn't load order details.</p>`;
+    }
+}
+</script>
+</body>
+</html>

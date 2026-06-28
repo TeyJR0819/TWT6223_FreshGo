@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Riders — FreshGo Admin</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/pages/admin.css">
+</head>
+<body>
+
+<button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle menu">☰</button>
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+<div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar__brand"><span class="sidebar__brand-icon">🍜</span> FreshGo Admin</div>
+        <nav class="sidebar__nav">
+            <a class="sidebar__link" href="dashboard.html">📊 Dashboard</a>
+            <a class="sidebar__link" href="orders.html">🧾 Orders</a>
+            <a class="sidebar__link" href="menu.html">🍽️ Menu</a>
+            <a class="sidebar__link is-active" href="riders.html">🛵 Riders</a>
+        </nav>
+        <div class="sidebar__footer">
+            <div class="sidebar__user">Signed in as<strong id="nav-user-name">—</strong></div>
+            <button class="btn btn--outline btn--block" id="logout-btn" style="background:rgba(255,255,255,0.08); color:#fff; border-color:rgba(255,255,255,0.2);">Log Out</button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <div class="page-header">
+            <div>
+                <h1>Rider Management</h1>
+                <p class="text-muted">Create and view rider accounts.</p>
+            </div>
+            <button class="btn btn--accent" id="add-rider-btn">+ Add Rider</button>
+        </div>
+
+        <div class="table-wrap">
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr><th>Name</th><th>Email</th><th>Phone</th></tr>
+                    </thead>
+                    <tbody id="riders-body">
+                        <tr><td colspan="3"><div class="loading-block"><span class="spinner spinner--dark"></span> Loading riders...</div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Add Rider Modal -->
+<div class="modal-overlay" id="rider-modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Add Rider</h3>
+            <button class="modal-close" id="modal-close-btn">&times;</button>
+        </div>
+        <form id="rider-form">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="rider-name">Name</label>
+                    <input class="form-input" type="text" id="rider-name" placeholder="Full name">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="rider-email">Email</label>
+                    <input class="form-input" type="email" id="rider-email" placeholder="rider@example.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="rider-phone">Phone</label>
+                    <input class="form-input" type="text" id="rider-phone" placeholder="012-3456789">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="rider-password">Password</label>
+                    <input class="form-input" type="password" id="rider-password" placeholder="At least 6 characters">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn--ghost" id="modal-cancel-btn">Cancel</button>
+                <button type="submit" class="btn btn--primary" id="rider-save-btn">Create Rider</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth.js"></script>
+<script>
+(async () => {
+    const user = await sessionGuard('admin');
+    if (!user) return;
+    initPage(user);
+})();
+
+function initPage(user) {
+    setupSidebar();
+    document.getElementById('logout-btn').addEventListener('click', logout);
+
+    document.getElementById('add-rider-btn').addEventListener('click', openModal);
+    document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('rider-modal-overlay').addEventListener('click', (e) => {
+        if (e.target.id === 'rider-modal-overlay') closeModal();
+    });
+    document.getElementById('rider-form').addEventListener('submit', createRider);
+
+    loadRiders();
+}
+
+function setupSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebar-toggle');
+    const overlay = document.getElementById('sidebar-overlay');
+    toggle.addEventListener('click', () => { sidebar.classList.add('is-open'); overlay.classList.add('is-open'); });
+    overlay.addEventListener('click', () => { sidebar.classList.remove('is-open'); overlay.classList.remove('is-open'); });
+}
+
+async function loadRiders() {
+    const body = document.getElementById('riders-body');
+    try {
+        const riders = await apiFetch('/riders/index.php');
+        if (riders.length === 0) {
+            body.innerHTML = `<tr><td colspan="3">
+                <div class="empty-state">
+                    <div class="empty-state__icon">🛵</div>
+                    <div class="empty-state__title">No riders found</div>
+                    <div class="empty-state__text">Add a rider account to start assigning deliveries.</div>
+                </div>
+            </td></tr>`;
+            return;
+        }
+        body.innerHTML = riders.map(r => `
+            <tr>
+                <td>${escapeHtml(r.name)}</td>
+                <td>${escapeHtml(r.email)}</td>
+                <td>${escapeHtml(r.phone || '—')}</td>
+            </tr>
+        `).join('');
+    } catch {
+        body.innerHTML = `<tr><td colspan="3">
+            <div class="empty-state">
+                <div class="empty-state__icon">⚠️</div>
+                <div class="empty-state__title">Couldn't load riders</div>
+                <div class="empty-state__text">Please try again shortly.</div>
+            </div>
+        </td></tr>`;
+    }
+}
+
+function openModal() {
+    document.getElementById('rider-form').reset();
+    clearFieldErrors();
+    document.getElementById('rider-modal-overlay').classList.add('is-open');
+}
+function closeModal() {
+    document.getElementById('rider-modal-overlay').classList.remove('is-open');
+}
+
+function isValidEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+async function createRider(e) {
+    e.preventDefault();
+    clearFieldErrors();
+
+    const name = document.getElementById('rider-name').value.trim();
+    const email = document.getElementById('rider-email').value.trim();
+    const phone = document.getElementById('rider-phone').value.trim();
+    const password = document.getElementById('rider-password').value;
+
+    let valid = true;
+    if (!name) { showFieldError('rider-name', 'Name is required'); valid = false; }
+    if (!email) { showFieldError('rider-email', 'Email is required'); valid = false; }
+    else if (!isValidEmail(email)) { showFieldError('rider-email', 'Please enter a valid email address'); valid = false; }
+    if (!password) { showFieldError('rider-password', 'Password is required'); valid = false; }
+    else if (password.length < 6) { showFieldError('rider-password', 'Password must be at least 6 characters'); valid = false; }
+    if (!valid) return;
+
+    const btn = document.getElementById('rider-save-btn');
+    setButtonLoading(btn, true);
+    try {
+        await apiFetch('/riders/index.php', 'POST', { name, email, phone, password });
+        showToast('Rider account created', 'success');
+        closeModal();
+        await loadRiders();
+    } finally {
+        setButtonLoading(btn, false);
+    }
+}
+</script>
+</body>
+</html>

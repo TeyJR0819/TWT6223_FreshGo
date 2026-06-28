@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deliveries — FreshGo Rider</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/pages/customer.css">
+<link rel="stylesheet" href="../css/pages/rider.css">
+</head>
+<body>
+
+<header class="topnav">
+    <div class="topnav__inner">
+        <div class="topnav__brand">🛵 FreshGo Rider</div>
+        <nav class="topnav__links">
+            <span class="text-muted" style="font-size:0.875rem;" id="nav-user-name">—</span>
+            <button class="btn btn--ghost btn--sm" id="logout-btn">Log Out</button>
+        </nav>
+    </div>
+</header>
+
+<div class="page-wrap">
+    <div class="page-intro">
+        <h1>My Deliveries</h1>
+        <p class="text-muted">Manage your assigned orders and update delivery status.</p>
+    </div>
+
+    <div class="rider-tabs">
+        <button class="rider-tab is-active" data-tab="active">Active</button>
+        <button class="rider-tab" data-tab="completed">Completed</button>
+    </div>
+
+    <div id="deliveries-container">
+        <div class="loading-block"><span class="spinner spinner--dark"></span> Loading deliveries...</div>
+    </div>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth.js"></script>
+<script>
+let orders = [];
+let activeTab = 'active';
+const ACTIVE_STATUSES = ['pending', 'preparing', 'out_for_delivery'];
+
+(async () => {
+    const user = await sessionGuard('rider');
+    if (!user) return;
+    initPage(user);
+})();
+
+function initPage(user) {
+    document.getElementById('logout-btn').addEventListener('click', logout);
+
+    document.querySelectorAll('.rider-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            activeTab = tab.dataset.tab;
+            document.querySelectorAll('.rider-tab').forEach(t => t.classList.toggle('is-active', t === tab));
+            renderDeliveries();
+        });
+    });
+
+    loadDeliveries();
+    setInterval(loadDeliveries, 20000);
+}
+
+async function loadDeliveries() {
+    const container = document.getElementById('deliveries-container');
+    try {
+        const assigned = await apiFetch('/orders/assigned.php');
+        const detailed = await Promise.all(
+            assigned.map(o => apiFetch(`/orders/item.php?id=${o.id}`).catch(() => o))
+        );
+        orders = detailed;
+        renderDeliveries();
+    } catch {
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-state__icon">⚠️</div>
+            <div class="empty-state__title">Couldn't load deliveries</div>
+            <div class="empty-state__text">Please try again shortly.</div>
+        </div>`;
+    }
+}
+
+function renderDeliveries() {
+    const container = document.getElementById('deliveries-container');
+    const filtered = activeTab === 'active'
+        ? orders.filter(o => ACTIVE_STATUSES.includes(o.status))
+        : orders.filter(o => o.status === 'delivered');
+
+    if (filtered.length === 0) {
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-state__icon">🛵</div>
+            <div class="empty-state__title">${activeTab === 'active' ? 'No active deliveries' : 'No completed deliveries yet'}</div>
+            <div class="empty-state__text">${activeTab === 'active' ? 'New assignments will appear here.' : 'Delivered orders will show up here.'}</div>
+        </div>`;
+        return;
+    }
+
+    container.innerHTML = `<div class="delivery-grid">${filtered.map(renderCard).join('')}</div>`;
+
+    container.querySelectorAll('[data-advance-id]').forEach(btn => {
+        btn.addEventListener('click', () => advanceStatus(parseInt(btn.dataset.advanceId, 10), btn.dataset.nextStatus));
+    });
+}
+
+function renderCard(o) {
+    const items = Array.isArray(o.items) ? o.items : [];
+    let actionBtn = '';
+    if (o.status === 'preparing') {
+        actionBtn = `<button class="btn btn--accent btn--block" data-advance-id="${o.id}" data-next-status="out_for_delivery">Mark as Out for Delivery</button>`;
+    } else if (o.status === 'out_for_delivery') {
+        actionBtn = `<button class="btn btn--primary btn--block" data-advance-id="${o.id}" data-next-status="delivered">Mark as Delivered</button>`;
+    } else if (o.status === 'pending') {
+        actionBtn = `<p class="text-muted" style="font-size:0.8rem; margin:0;">Waiting for the kitchen to start preparing this order.</p>`;
+    }
+
+    return `
+        <div class="delivery-card">
+            <div class="delivery-card__top">
+                <div class="delivery-card__id">Order #${o.id}</div>
+                ${statusBadge(o.status)}
+            </div>
+            <p class="text-muted" style="font-size:0.85rem; margin-bottom:4px;"><strong>${escapeHtml(o.customer_name || '')}</strong>${o.customer_phone ? ' · ' + escapeHtml(o.customer_phone) : ''}</p>
+            <div class="delivery-card__address">📍 <span>${escapeHtml(o.delivery_address || '')}</span></div>
+            <ul class="delivery-card__items">
+                ${items.map(it => `<li><span>${escapeHtml(it.item_name)} × ${it.quantity}</span><span>${formatPrice(it.unit_price * it.quantity)}</span></li>`).join('')}
+            </ul>
+            <div class="delivery-card__total"><span>Total</span><span>${formatPrice(o.total_price)}</span></div>
+            ${actionBtn}
+        </div>
+    `;
+}
+
+async function advanceStatus(orderId, nextStatus) {
+    try {
+        await apiFetch(`/orders/item.php?id=${orderId}`, 'PUT', { status: nextStatus });
+        showToast('Delivery status updated', 'success');
+        await loadDeliveries();
+    } catch { /* toast already shown */ }
+}
+</script>
+</body>
+</html>

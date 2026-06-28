@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orders — FreshGo Admin</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/pages/admin.css">
+</head>
+<body>
+
+<button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle menu">☰</button>
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+<div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar__brand"><span class="sidebar__brand-icon">🍜</span> FreshGo Admin</div>
+        <nav class="sidebar__nav">
+            <a class="sidebar__link" href="dashboard.html">📊 Dashboard</a>
+            <a class="sidebar__link is-active" href="orders.html">🧾 Orders</a>
+            <a class="sidebar__link" href="menu.html">🍽️ Menu</a>
+            <a class="sidebar__link" href="riders.html">🛵 Riders</a>
+        </nav>
+        <div class="sidebar__footer">
+            <div class="sidebar__user">Signed in as<strong id="nav-user-name">—</strong></div>
+            <button class="btn btn--outline btn--block" id="logout-btn" style="background:rgba(255,255,255,0.08); color:#fff; border-color:rgba(255,255,255,0.2);">Log Out</button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <div class="page-header">
+            <div>
+                <h1>Orders</h1>
+                <p class="text-muted">View, update, and assign riders to customer orders.</p>
+            </div>
+        </div>
+
+        <div class="filter-bar">
+            <select class="form-select" id="status-filter">
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="preparing">Preparing</option>
+                <option value="out_for_delivery">Out for Delivery</option>
+                <option value="delivered">Delivered</option>
+                <option value="cancelled">Cancelled</option>
+            </select>
+        </div>
+
+        <div class="table-wrap">
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Customer</th>
+                            <th>Items</th>
+                            <th>Total</th>
+                            <th>Status</th>
+                            <th>Rider</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orders-body">
+                        <tr><td colspan="7"><div class="loading-block"><span class="spinner spinner--dark"></span> Loading orders...</div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth.js"></script>
+<script>
+const STATUS_OPTIONS = ['pending', 'preparing', 'out_for_delivery', 'delivered', 'cancelled'];
+const STATUS_LABELS = {
+    pending: 'Pending', preparing: 'Preparing', out_for_delivery: 'Out for Delivery',
+    delivered: 'Delivered', cancelled: 'Cancelled'
+};
+
+let allOrders = [];
+let allRiders = [];
+let expandedOrderId = null;
+
+(async () => {
+    const user = await sessionGuard('admin');
+    if (!user) return;
+    initPage(user);
+})();
+
+function initPage(user) {
+    setupSidebar();
+    document.getElementById('logout-btn').addEventListener('click', logout);
+    document.getElementById('status-filter').addEventListener('change', renderOrders);
+
+    loadRiders();
+    loadOrders();
+}
+
+function setupSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebar-toggle');
+    const overlay = document.getElementById('sidebar-overlay');
+    toggle.addEventListener('click', () => { sidebar.classList.add('is-open'); overlay.classList.add('is-open'); });
+    overlay.addEventListener('click', () => { sidebar.classList.remove('is-open'); overlay.classList.remove('is-open'); });
+}
+
+async function loadRiders() {
+    try {
+        allRiders = await apiFetch('/riders/index.php');
+    } catch {
+        allRiders = [];
+    }
+}
+
+async function loadOrders() {
+    const body = document.getElementById('orders-body');
+    try {
+        allOrders = await apiFetch('/orders/index.php');
+        renderOrders();
+    } catch {
+        body.innerHTML = `<tr><td colspan="7">
+            <div class="empty-state">
+                <div class="empty-state__icon">⚠️</div>
+                <div class="empty-state__title">Couldn't load orders</div>
+                <div class="empty-state__text">Please try again shortly.</div>
+            </div>
+        </td></tr>`;
+    }
+}
+
+function riderOptions(order) {
+    const opts = ['<option value="">Unassigned</option>'];
+    allRiders.forEach(r => {
+        const selected = order.rider_id == r.id ? 'selected' : '';
+        opts.push(`<option value="${r.id}" ${selected}>${escapeHtml(r.name)}</option>`);
+    });
+    return opts.join('');
+}
+
+function statusOptions(order) {
+    return STATUS_OPTIONS.map(s =>
+        `<option value="${s}" ${order.status === s ? 'selected' : ''}>${STATUS_LABELS[s]}</option>`
+    ).join('');
+}
+
+function renderOrders() {
+    const filter = document.getElementById('status-filter').value;
+    const body = document.getElementById('orders-body');
+    const filtered = filter === 'all' ? allOrders : allOrders.filter(o => o.status === filter);
+
+    if (filtered.length === 0) {
+        body.innerHTML = `<tr><td colspan="7">
+            <div class="empty-state">
+                <div class="empty-state__icon">🧾</div>
+                <div class="empty-state__title">No orders found</div>
+                <div class="empty-state__text">Try a different filter.</div>
+            </div>
+        </td></tr>`;
+        return;
+    }
+
+    body.innerHTML = filtered.map(o => `
+        <tr class="is-clickable ${expandedOrderId === o.id ? 'is-expanded' : ''}" data-order-row="${o.id}">
+            <td>#${o.id}</td>
+            <td>${escapeHtml(o.customer_name)}</td>
+            <td>${o.item_count}</td>
+            <td>${formatPrice(o.total_price)}</td>
+            <td>
+                <select class="table-select status-select" data-order-id="${o.id}">
+                    ${statusOptions(o)}
+                </select>
+            </td>
+            <td>
+                <select class="table-select rider-select" data-order-id="${o.id}">
+                    ${riderOptions(o)}
+                </select>
+            </td>
+            <td>${formatDate(o.created_at)}</td>
+        </tr>
+        ${expandedOrderId === o.id ? `<tr class="order-detail-row"><td colspan="7">
+            <div class="order-detail" id="order-detail-${o.id}">
+                <div class="loading-block"><span class="spinner spinner--dark"></span> Loading items...</div>
+            </div>
+        </td></tr>` : ''}
+    `).join('');
+
+    if (expandedOrderId !== null && filtered.some(o => o.id === expandedOrderId)) {
+        loadOrderDetail(expandedOrderId);
+    }
+
+    // Row click toggles expand (ignore clicks on selects)
+    body.querySelectorAll('tr[data-order-row]').forEach(row => {
+        row.addEventListener('click', (e) => {
+            if (e.target.closest('select')) return;
+            const id = parseInt(row.dataset.orderRow, 10);
+            expandedOrderId = expandedOrderId === id ? null : id;
+            renderOrders();
+        });
+    });
+
+    // Status change
+    body.querySelectorAll('.status-select').forEach(sel => {
+        sel.addEventListener('click', e => e.stopPropagation());
+        sel.addEventListener('change', async () => {
+            const id = parseInt(sel.dataset.orderId, 10);
+            const newStatus = sel.value;
+            try {
+                await apiFetch(`/orders/item.php?id=${id}`, 'PUT', { status: newStatus });
+                const order = allOrders.find(o => o.id === id);
+                if (order) order.status = newStatus;
+                showToast('Order status updated', 'success');
+            } catch {
+                renderOrders();
+            }
+        });
+    });
+
+    // Rider assign
+    body.querySelectorAll('.rider-select').forEach(sel => {
+        sel.addEventListener('click', e => e.stopPropagation());
+        sel.addEventListener('change', async () => {
+            const id = parseInt(sel.dataset.orderId, 10);
+            const riderId = sel.value;
+            if (!riderId) { renderOrders(); return; }
+            try {
+                await apiFetch('/riders/assign.php', 'PUT', { order_id: id, rider_id: parseInt(riderId, 10) });
+                const order = allOrders.find(o => o.id === id);
+                if (order) {
+                    order.rider_id = parseInt(riderId, 10);
+                    const rider = allRiders.find(r => r.id == riderId);
+                    order.rider_name = rider ? rider.name : null;
+                }
+                showToast('Rider assigned successfully', 'success');
+            } catch {
+                renderOrders();
+            }
+        });
+    });
+}
+
+async function loadOrderDetail(orderId) {
+    const container = document.getElementById(`order-detail-${orderId}`);
+    if (!container) return;
+    try {
+        const order = await apiFetch(`/orders/item.php?id=${orderId}`);
+        container.innerHTML = `
+            <p style="margin-bottom:10px;"><strong>Delivery Address:</strong> ${escapeHtml(order.delivery_address)}</p>
+            ${order.notes ? `<p style="margin-bottom:10px;"><strong>Notes:</strong> ${escapeHtml(order.notes)}</p>` : ''}
+            <ul>
+                ${order.items.map(it => `
+                    <li><span>${escapeHtml(it.item_name)} × ${it.quantity}</span><span>${formatPrice(it.unit_price * it.quantity)}</span></li>
+                `).join('')}
+            </ul>
+        `;
+    } catch {
+        container.innerHTML = `<p class="text-danger">Couldn't load order details.</p>`;
+    }
+}
+</script>
+</body>
+</html>

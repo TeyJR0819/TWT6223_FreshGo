@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Menu — FreshGo</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/pages/customer.css">
+</head>
+<body>
+
+<header class="topnav">
+    <div class="topnav__inner">
+        <div class="topnav__brand">🍜 FreshGo</div>
+        <nav class="topnav__links">
+            <a class="topnav__link is-active" href="menu.html">Menu</a>
+            <a class="topnav__link" href="cart.html" style="position:relative;">
+                Cart
+                <span class="cart-badge" id="cart-badge" style="display:none;">0</span>
+            </a>
+            <a class="topnav__link" href="track.html">My Orders</a>
+            <button class="btn btn--ghost btn--sm" id="logout-btn">Log Out</button>
+        </nav>
+    </div>
+</header>
+
+<div class="page-wrap">
+    <div class="page-intro">
+        <h1>What would you like to eat?</h1>
+        <p class="text-muted" id="nav-user-name-line">Browse our menu and add items to your cart.</p>
+    </div>
+
+    <div class="tabs" id="category-tabs">
+        <button class="tab is-active" data-category="all">All</button>
+    </div>
+
+    <div id="menu-grid-container">
+        <div class="loading-block"><span class="spinner spinner--dark"></span> Loading menu...</div>
+    </div>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/cart.js"></script>
+<script>
+let allItems = [];
+let activeCategory = 'all';
+
+(async () => {
+    const user = await sessionGuard('customer');
+    if (!user) return;
+    initPage(user);
+})();
+
+function initPage(user) {
+    document.getElementById('logout-btn').addEventListener('click', logout);
+    updateCartBadge();
+    loadMenu();
+}
+
+async function loadMenu() {
+    const container = document.getElementById('menu-grid-container');
+    try {
+        allItems = (await apiFetch('/menu/index.php')).filter(i => parseInt(i.available));
+        renderCategoryTabs();
+        renderGrid();
+    } catch {
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-state__icon">⚠️</div>
+            <div class="empty-state__title">Couldn't load the menu</div>
+            <div class="empty-state__text">Please try again shortly.</div>
+        </div>`;
+    }
+}
+
+function renderCategoryTabs() {
+    const categories = ['all', ...new Set(allItems.map(i => i.category))];
+    const tabsEl = document.getElementById('category-tabs');
+    tabsEl.innerHTML = categories.map(c =>
+        `<button class="tab ${activeCategory === c ? 'is-active' : ''}" data-category="${escapeHtml(c)}">${c === 'all' ? 'All' : escapeHtml(c)}</button>`
+    ).join('');
+    tabsEl.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            activeCategory = tab.dataset.category;
+            renderCategoryTabs();
+            renderGrid();
+        });
+    });
+}
+
+function renderGrid() {
+    const container = document.getElementById('menu-grid-container');
+    const items = activeCategory === 'all' ? allItems : allItems.filter(i => i.category === activeCategory);
+
+    if (items.length === 0) {
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-state__icon">🍽️</div>
+            <div class="empty-state__title">No items in this category</div>
+            <div class="empty-state__text">Try selecting a different category.</div>
+        </div>`;
+        return;
+    }
+
+    container.innerHTML = `<div class="menu-grid">${items.map(renderCard).join('')}</div>`;
+
+    container.querySelectorAll('[data-add-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const item = allItems.find(i => i.id === parseInt(btn.dataset.addId, 10));
+            addToCart(item);
+            showToast('Added to cart!', 'success');
+            updateCartBadge();
+        });
+    });
+}
+
+function renderCard(item) {
+    const img = item.image_url
+        ? `<img class="menu-card__image" src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name)}" onerror="this.outerHTML='<div class=&quot;menu-card__image menu-card__image--placeholder&quot;>🍽️</div>';">`
+        : `<div class="menu-card__image menu-card__image--placeholder">🍽️</div>`;
+
+    return `
+        <div class="menu-card">
+            ${img}
+            <div class="menu-card__body">
+                <div class="menu-card__category">${escapeHtml(item.category)}</div>
+                <div class="menu-card__name">${escapeHtml(item.name)}</div>
+                <div class="menu-card__desc">${escapeHtml(item.description || '')}</div>
+                <div class="menu-card__footer">
+                    <span class="menu-card__price">${formatPrice(item.price)}</span>
+                    <button class="btn btn--accent" data-add-id="${item.id}">+ Add to Cart</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+</script>
+</body>
+</html>

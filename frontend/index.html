@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FreshGo — Sign In</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/pages/auth.css">
+</head>
+<body class="auth-page">
+
+<div class="auth-shell">
+    <div class="auth-hero">
+        <div class="auth-hero__icon">🍜</div>
+        <h1>FreshGo Delivery</h1>
+        <p>Order your favourite local dishes and track every delivery in real time.</p>
+        <ul class="auth-hero__features">
+            <li>🛵 Live order tracking</li>
+            <li>🍛 Fresh local menu, updated daily</li>
+            <li>⚡ Fast, reliable delivery network</li>
+        </ul>
+    </div>
+
+    <div class="auth-form-panel">
+        <div class="auth-tabs">
+            <button class="auth-tab is-active" id="tab-login" type="button">Sign In</button>
+            <button class="auth-tab" id="tab-register" type="button">Register</button>
+        </div>
+
+        <!-- LOGIN PANEL -->
+        <div class="auth-panel is-active" id="panel-login">
+            <h2>Welcome back</h2>
+            <p class="text-muted">Sign in to continue to your account.</p>
+
+            <form id="login-form" novalidate>
+                <div class="form-group">
+                    <label class="form-label" for="login-email">Email</label>
+                    <input class="form-input" type="email" id="login-email" autocomplete="email" placeholder="you@example.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="login-password">Password</label>
+                    <input class="form-input" type="password" id="login-password" autocomplete="current-password" placeholder="••••••••">
+                </div>
+                <button class="btn btn--primary btn--block" type="submit" id="login-btn">Sign In</button>
+            </form>
+
+            <div class="auth-demo-hint">
+                Demo admin account — Email: <strong>admin@food.com</strong> · Password: <strong>FreshGo#Adm1n26</strong>
+            </div>
+        </div>
+
+        <!-- REGISTER PANEL -->
+        <div class="auth-panel" id="panel-register">
+            <h2>Create an account</h2>
+            <p class="text-muted">Register as a customer to start ordering.</p>
+
+            <form id="register-form" novalidate>
+                <div class="form-group">
+                    <label class="form-label" for="reg-name">Full Name</label>
+                    <input class="form-input" type="text" id="reg-name" autocomplete="name" placeholder="Jane Doe">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="reg-email">Email</label>
+                    <input class="form-input" type="email" id="reg-email" autocomplete="email" placeholder="you@example.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="reg-password">Password</label>
+                    <input class="form-input" type="password" id="reg-password" autocomplete="new-password" placeholder="At least 6 characters">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="reg-confirm">Confirm Password</label>
+                    <input class="form-input" type="password" id="reg-confirm" autocomplete="new-password" placeholder="Re-enter password">
+                </div>
+                <button class="btn btn--primary btn--block" type="submit" id="register-btn">Create Account</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+<script>
+const ROLE_REDIRECT = {
+    admin: 'admin/dashboard.html',
+    customer: 'customer/menu.html',
+    rider: 'rider/deliveries.html',
+};
+
+function redirectForRole(role) {
+    window.location.href = ROLE_REDIRECT[role] || 'index.html';
+}
+
+// ===== Tabs =====
+const tabLogin = document.getElementById('tab-login');
+const tabRegister = document.getElementById('tab-register');
+const panelLogin = document.getElementById('panel-login');
+const panelRegister = document.getElementById('panel-register');
+
+tabLogin.addEventListener('click', () => {
+    tabLogin.classList.add('is-active');
+    tabRegister.classList.remove('is-active');
+    panelLogin.classList.add('is-active');
+    panelRegister.classList.remove('is-active');
+    clearFieldErrors();
+});
+tabRegister.addEventListener('click', () => {
+    tabRegister.classList.add('is-active');
+    tabLogin.classList.remove('is-active');
+    panelRegister.classList.add('is-active');
+    panelLogin.classList.remove('is-active');
+    clearFieldErrors();
+});
+
+function isValidEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+// ===== Login =====
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearFieldErrors();
+
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    let valid = true;
+
+    if (!email) { showFieldError('login-email', 'Email is required'); valid = false; }
+    else if (!isValidEmail(email)) { showFieldError('login-email', 'Please enter a valid email address'); valid = false; }
+
+    if (!password) { showFieldError('login-password', 'Password is required'); valid = false; }
+
+    if (!valid) return;
+
+    const btn = document.getElementById('login-btn');
+    setButtonLoading(btn, true);
+    try {
+        const user = await apiFetch('/auth/login.php', 'POST', { email, password });
+        sessionStorage.setItem('user', JSON.stringify(user));
+        showToast(`Welcome back, ${user.name}!`, 'success');
+        setTimeout(() => redirectForRole(user.role), 600);
+    } catch {
+        setButtonLoading(btn, false);
+        showToast(err.message, 'error');
+    }
+});
+
+// ===== Register =====
+document.getElementById('register-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearFieldErrors();
+
+    const name = document.getElementById('reg-name').value.trim();
+    const email = document.getElementById('reg-email').value.trim();
+    const password = document.getElementById('reg-password').value;
+    const confirm = document.getElementById('reg-confirm').value;
+    let valid = true;
+
+    if (!name) { showFieldError('reg-name', 'Name is required'); valid = false; }
+    else if (name.length < 2) { showFieldError('reg-name', 'Name must be at least 2 characters'); valid = false; }
+
+    if (!email) { showFieldError('reg-email', 'Email is required'); valid = false; }
+    else if (!isValidEmail(email)) { showFieldError('reg-email', 'Please enter a valid email address'); valid = false; }
+
+    if (!password) { showFieldError('reg-password', 'Password is required'); valid = false; }
+    else if (password.length < 6) { showFieldError('reg-password', 'Password must be at least 6 characters'); valid = false; }
+
+    if (!confirm) { showFieldError('reg-confirm', 'Please confirm your password'); valid = false; }
+    else if (password && confirm !== password) { showFieldError('reg-confirm', "Passwords don't match"); valid = false; }
+
+    if (!valid) return;
+
+    const btn = document.getElementById('register-btn');
+    setButtonLoading(btn, true);
+    try {
+        const user = await apiFetch('/auth/register.php', 'POST', { name, email, password });
+        sessionStorage.setItem('user', JSON.stringify(user));
+        showToast(`Welcome, ${user.name}! Account created.`, 'success');
+        setTimeout(() => redirectForRole(user.role), 600);
+    } catch {
+        setButtonLoading(btn, false);
+        showToast(err.message, 'error');
+    }
+});
+</script>
+</body>
+</html>

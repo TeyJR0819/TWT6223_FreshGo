@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cart — FreshGo</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/pages/customer.css">
+</head>
+<body>
+
+<header class="topnav">
+    <div class="topnav__inner">
+        <div class="topnav__brand">🍜 FreshGo</div>
+        <nav class="topnav__links">
+            <a class="topnav__link" href="menu.html">Menu</a>
+            <a class="topnav__link is-active" href="cart.html" style="position:relative;">
+                Cart
+                <span class="cart-badge" id="cart-badge" style="display:none;">0</span>
+            </a>
+            <a class="topnav__link" href="track.html">My Orders</a>
+            <button class="btn btn--ghost btn--sm" id="logout-btn">Log Out</button>
+        </nav>
+    </div>
+</header>
+
+<div class="page-wrap">
+    <div class="page-intro">
+        <h1>Your Cart</h1>
+        <p class="text-muted">Review your items and place your order.</p>
+    </div>
+
+    <div id="cart-container">
+        <!-- Rendered by JS -->
+    </div>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/cart.js"></script>
+<script>
+const DELIVERY_FEE = 2.00;
+
+(async () => {
+    const user = await sessionGuard('customer');
+    if (!user) return;
+    initPage(user);
+})();
+
+function initPage(user) {
+    document.getElementById('logout-btn').addEventListener('click', logout);
+    updateCartBadge();
+    renderCart();
+}
+
+function renderCart() {
+    const container = document.getElementById('cart-container');
+    const cart = getCart();
+
+    if (cart.length === 0) {
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-state__icon">🛒</div>
+            <div class="empty-state__title">Your cart is empty</div>
+            <div class="empty-state__text">Browse the <a href="menu.html">menu</a> to add some delicious items.</div>
+        </div>`;
+        return;
+    }
+
+    const subtotal = cart.reduce((sum, c) => sum + c.price * c.quantity, 0);
+    const total = subtotal + DELIVERY_FEE;
+
+    container.innerHTML = `
+        <div class="cart-layout">
+            <div class="card">
+                <h3 class="mt-0">Order Items</h3>
+                <div id="cart-items">
+                    ${cart.map(c => `
+                        <div class="cart-item">
+                            <div class="cart-item__info">
+                                <div class="cart-item__name">${escapeHtml(c.name)}</div>
+                                <div class="cart-item__price">${formatPrice(c.price)} each</div>
+                            </div>
+                            <div class="qty-stepper">
+                                <button data-decr="${c.menu_item_id}" type="button">−</button>
+                                <span>${c.quantity}</span>
+                                <button data-incr="${c.menu_item_id}" type="button">+</button>
+                            </div>
+                            <div class="cart-item__subtotal">${formatPrice(c.price * c.quantity)}</div>
+                            <button class="cart-item__remove" data-remove="${c.menu_item_id}" type="button" aria-label="Remove item">&times;</button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <div>
+                <div class="card" style="margin-bottom:20px;">
+                    <h3 class="mt-0">Order Summary</h3>
+                    <div class="order-summary-row"><span>Subtotal</span><span>${formatPrice(subtotal)}</span></div>
+                    <div class="order-summary-row"><span>Delivery Fee</span><span>${formatPrice(DELIVERY_FEE)}</span></div>
+                    <div class="order-summary-row total"><span>Total</span><span>${formatPrice(total)}</span></div>
+                </div>
+
+                <div class="card">
+                    <form id="checkout-form" novalidate>
+                        <div class="form-group">
+                            <label class="form-label" for="delivery-address">Delivery Address</label>
+                            <textarea class="form-textarea" id="delivery-address" placeholder="Enter your full delivery address"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="order-notes">Order Notes (optional)</label>
+                            <textarea class="form-textarea" id="order-notes" placeholder="e.g. no spice, leave at door"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn--accent btn--block" id="place-order-btn">Place Order</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    `;
+
+    container.querySelectorAll('[data-incr]').forEach(btn => {
+        btn.addEventListener('click', () => { updateCartQuantity(parseInt(btn.dataset.incr, 10), 1); renderCart(); updateCartBadge(); });
+    });
+    container.querySelectorAll('[data-decr]').forEach(btn => {
+        btn.addEventListener('click', () => { updateCartQuantity(parseInt(btn.dataset.decr, 10), -1); renderCart(); updateCartBadge(); });
+    });
+    container.querySelectorAll('[data-remove]').forEach(btn => {
+        btn.addEventListener('click', () => { removeFromCart(parseInt(btn.dataset.remove, 10)); renderCart(); updateCartBadge(); });
+    });
+
+    document.getElementById('checkout-form').addEventListener('submit', placeOrder);
+}
+
+async function placeOrder(e) {
+    e.preventDefault();
+    clearFieldErrors();
+
+    const cart = getCart();
+    if (cart.length === 0) {
+        showToast('Your cart is empty', 'error');
+        return;
+    }
+
+    const address = document.getElementById('delivery-address').value.trim();
+    const notes = document.getElementById('order-notes').value.trim();
+
+    if (!address) {
+        showFieldError('delivery-address', 'Delivery address is required');
+        return;
+    }
+
+    const btn = document.getElementById('place-order-btn');
+    setButtonLoading(btn, true);
+
+    try {
+        await apiFetch('/orders/index.php', 'POST', {
+            delivery_address: address,
+            notes,
+            items: cart.map(c => ({ menu_item_id: c.menu_item_id, quantity: c.quantity })),
+        });
+        clearCart();
+        showToast('Order placed successfully!', 'success');
+        setTimeout(() => { window.location.href = 'track.html'; }, 800);
+    } catch {
+        setButtonLoading(btn, false);
+    }
+}
+</script>
+</body>
+</html>

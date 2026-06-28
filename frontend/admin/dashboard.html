@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — FreshGo Admin</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/pages/admin.css">
+</head>
+<body>
+
+<button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle menu">☰</button>
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+<div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar__brand"><span class="sidebar__brand-icon">🍜</span> FreshGo Admin</div>
+        <nav class="sidebar__nav">
+            <a class="sidebar__link is-active" href="dashboard.html">📊 Dashboard</a>
+            <a class="sidebar__link" href="orders.html">🧾 Orders</a>
+            <a class="sidebar__link" href="menu.html">🍽️ Menu</a>
+            <a class="sidebar__link" href="riders.html">🛵 Riders</a>
+        </nav>
+        <div class="sidebar__footer">
+            <div class="sidebar__user">Signed in as<strong id="nav-user-name">—</strong></div>
+            <button class="btn btn--outline btn--block" id="logout-btn" style="background:rgba(255,255,255,0.08); color:#fff; border-color:rgba(255,255,255,0.2);">Log Out</button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <div class="page-header">
+            <div>
+                <h1>Dashboard</h1>
+                <p class="text-muted">Live overview of orders, deliveries, and revenue.</p>
+            </div>
+        </div>
+
+        <div class="kpi-grid" id="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-icon kpi-icon--blue">🧾</div>
+                <div>
+                    <div class="kpi-label">Total Orders</div>
+                    <div class="kpi-value" id="kpi-total-orders"><span class="spinner spinner--dark"></span></div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon kpi-icon--amber">⏳</div>
+                <div>
+                    <div class="kpi-label">Pending Orders</div>
+                    <div class="kpi-value" id="kpi-pending-orders"><span class="spinner spinner--dark"></span></div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon kpi-icon--purple">🛵</div>
+                <div>
+                    <div class="kpi-label">Active Deliveries</div>
+                    <div class="kpi-value" id="kpi-active-deliveries"><span class="spinner spinner--dark"></span></div>
+                </div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon kpi-icon--green">💰</div>
+                <div>
+                    <div class="kpi-label">Total Revenue</div>
+                    <div class="kpi-value" id="kpi-total-revenue"><span class="spinner spinner--dark"></span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">
+            <h2>Recent Orders</h2>
+        </div>
+        <div class="table-wrap">
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Customer</th>
+                            <th>Items</th>
+                            <th>Total</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recent-orders-body">
+                        <tr><td colspan="6"><div class="loading-block"><span class="spinner spinner--dark"></span> Loading orders...</div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth.js"></script>
+<script>
+(async () => {
+    const user = await sessionGuard('admin');
+    if (!user) return;
+    initPage(user);
+})();
+
+function initPage(user) {
+    setupSidebar();
+    document.getElementById('logout-btn').addEventListener('click', logout);
+
+    loadStats();
+    loadRecentOrders();
+
+    setInterval(() => {
+        loadStats();
+        loadRecentOrders();
+    }, 30000);
+}
+
+function setupSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebar-toggle');
+    const overlay = document.getElementById('sidebar-overlay');
+    toggle.addEventListener('click', () => {
+        sidebar.classList.add('is-open');
+        overlay.classList.add('is-open');
+    });
+    overlay.addEventListener('click', () => {
+        sidebar.classList.remove('is-open');
+        overlay.classList.remove('is-open');
+    });
+}
+
+async function loadStats() {
+    try {
+        const stats = await apiFetch('/stats/index.php');
+        document.getElementById('kpi-total-orders').textContent = stats.total_orders;
+        document.getElementById('kpi-pending-orders').textContent = stats.pending_orders;
+        document.getElementById('kpi-active-deliveries').textContent = stats.active_deliveries;
+        document.getElementById('kpi-total-revenue').textContent = formatPrice(stats.total_revenue);
+    } catch { /* toast already shown by apiFetch */ }
+}
+
+async function loadRecentOrders() {
+    const body = document.getElementById('recent-orders-body');
+    try {
+        const orders = await apiFetch('/orders/index.php');
+        const recent = orders.slice(0, 10);
+
+        if (recent.length === 0) {
+            body.innerHTML = `<tr><td colspan="6">
+                <div class="empty-state">
+                    <div class="empty-state__icon">🧾</div>
+                    <div class="empty-state__title">No orders found</div>
+                    <div class="empty-state__text">New orders will appear here as customers place them.</div>
+                </div>
+            </td></tr>`;
+            return;
+        }
+
+        body.innerHTML = recent.map(o => `
+            <tr>
+                <td>#${o.id}</td>
+                <td>${escapeHtml(o.customer_name)}</td>
+                <td>${o.item_count}</td>
+                <td>${formatPrice(o.total_price)}</td>
+                <td>${statusBadge(o.status)}</td>
+                <td>${formatDate(o.created_at)}</td>
+            </tr>
+        `).join('');
+    } catch {
+        body.innerHTML = `<tr><td colspan="6">
+            <div class="empty-state">
+                <div class="empty-state__icon">⚠️</div>
+                <div class="empty-state__title">Couldn't load orders</div>
+                <div class="empty-state__text">Please try again shortly.</div>
+            </div>
+        </td></tr>`;
+    }
+}
+</script>
+</body>
+</html>

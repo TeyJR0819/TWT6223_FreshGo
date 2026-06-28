@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Menu — FreshGo Admin</title>
+<link rel="stylesheet" href="../css/style.css">
+<link rel="stylesheet" href="../css/components.css">
+<link rel="stylesheet" href="../css/pages/admin.css">
+</head>
+<body>
+
+<button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle menu">☰</button>
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+<div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar__brand"><span class="sidebar__brand-icon">🍜</span> FreshGo Admin</div>
+        <nav class="sidebar__nav">
+            <a class="sidebar__link" href="dashboard.html">📊 Dashboard</a>
+            <a class="sidebar__link" href="orders.html">🧾 Orders</a>
+            <a class="sidebar__link is-active" href="menu.html">🍽️ Menu</a>
+            <a class="sidebar__link" href="riders.html">🛵 Riders</a>
+        </nav>
+        <div class="sidebar__footer">
+            <div class="sidebar__user">Signed in as<strong id="nav-user-name">—</strong></div>
+            <button class="btn btn--outline btn--block" id="logout-btn" style="background:rgba(255,255,255,0.08); color:#fff; border-color:rgba(255,255,255,0.2);">Log Out</button>
+        </div>
+    </aside>
+
+    <main class="main">
+        <div class="page-header">
+            <div>
+                <h1>Menu Management</h1>
+                <p class="text-muted">Add, edit, and manage available menu items.</p>
+            </div>
+            <button class="btn btn--accent" id="add-item-btn">+ Add Item</button>
+        </div>
+
+        <div class="tabs" id="category-tabs">
+            <button class="tab is-active" data-category="all">All</button>
+        </div>
+
+        <div id="menu-grid-container">
+            <div class="loading-block"><span class="spinner spinner--dark"></span> Loading menu...</div>
+        </div>
+    </main>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="item-modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modal-title">Add Menu Item</h3>
+            <button class="modal-close" id="modal-close-btn">&times;</button>
+        </div>
+        <form id="item-form">
+            <div class="modal-body">
+                <input type="hidden" id="item-id">
+                <div class="form-group">
+                    <label class="form-label" for="item-name">Name</label>
+                    <input class="form-input" type="text" id="item-name" placeholder="e.g. Nasi Lemak">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="item-description">Description</label>
+                    <textarea class="form-textarea" id="item-description" placeholder="Short description"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="item-price">Price (RM)</label>
+                        <input class="form-input" type="number" step="0.01" min="0.01" id="item-price" placeholder="8.50">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="item-category">Category</label>
+                        <input class="form-input" type="text" id="item-category" placeholder="e.g. Rice">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="item-image">Image URL</label>
+                    <input class="form-input" type="text" id="item-image" placeholder="https://example.com/image.jpg">
+                    <div class="image-preview" id="image-preview">No image</div>
+                </div>
+                <div class="form-group form-check">
+                    <input type="checkbox" id="item-available" checked>
+                    <label class="form-label mb-0" for="item-available">Available for ordering</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn--ghost" id="modal-cancel-btn">Cancel</button>
+                <button type="submit" class="btn btn--primary" id="item-save-btn">Save Item</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/utils.js"></script>
+<script src="../js/api.js"></script>
+<script src="../js/auth.js"></script>
+<script>
+let allItems = [];
+let activeCategory = 'all';
+
+(async () => {
+    const user = await sessionGuard('admin');
+    if (!user) return;
+    initPage(user);
+})();
+
+function initPage(user) {
+    setupSidebar();
+    document.getElementById('logout-btn').addEventListener('click', logout);
+
+    document.getElementById('add-item-btn').addEventListener('click', () => openModal());
+    document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('item-modal-overlay').addEventListener('click', (e) => {
+        if (e.target.id === 'item-modal-overlay') closeModal();
+    });
+    document.getElementById('item-image').addEventListener('input', updateImagePreview);
+    document.getElementById('item-form').addEventListener('submit', saveItem);
+
+    loadMenu();
+}
+
+function setupSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebar-toggle');
+    const overlay = document.getElementById('sidebar-overlay');
+    toggle.addEventListener('click', () => { sidebar.classList.add('is-open'); overlay.classList.add('is-open'); });
+    overlay.addEventListener('click', () => { sidebar.classList.remove('is-open'); overlay.classList.remove('is-open'); });
+}
+
+async function loadMenu() {
+    const container = document.getElementById('menu-grid-container');
+    try {
+        allItems = await apiFetch('/menu/index.php');
+        renderCategoryTabs();
+        renderGrid();
+    } catch {
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-state__icon">⚠️</div>
+            <div class="empty-state__title">Couldn't load menu</div>
+            <div class="empty-state__text">Please try again shortly.</div>
+        </div>`;
+    }
+}
+
+function renderCategoryTabs() {
+    const categories = ['all', ...new Set(allItems.map(i => i.category))];
+    const tabsEl = document.getElementById('category-tabs');
+    tabsEl.innerHTML = categories.map(c =>
+        `<button class="tab ${activeCategory === c ? 'is-active' : ''}" data-category="${escapeHtml(c)}">${c === 'all' ? 'All' : escapeHtml(c)}</button>`
+    ).join('');
+    tabsEl.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            activeCategory = tab.dataset.category;
+            renderCategoryTabs();
+            renderGrid();
+        });
+    });
+}
+
+function renderGrid() {
+    const container = document.getElementById('menu-grid-container');
+    const items = activeCategory === 'all' ? allItems : allItems.filter(i => i.category === activeCategory);
+
+    if (items.length === 0) {
+        container.innerHTML = `<div class="empty-state">
+            <div class="empty-state__icon">🍽️</div>
+            <div class="empty-state__title">No menu items found</div>
+            <div class="empty-state__text">Add your first item to get started.</div>
+        </div>`;
+        return;
+    }
+
+    container.innerHTML = `<div class="menu-grid">${items.map(renderCard).join('')}</div>`;
+
+    container.querySelectorAll('[data-edit-id]').forEach(btn => {
+        btn.addEventListener('click', () => openModal(allItems.find(i => i.id === parseInt(btn.dataset.editId, 10))));
+    });
+    container.querySelectorAll('[data-delete-id]').forEach(btn => {
+        btn.addEventListener('click', () => deleteItem(parseInt(btn.dataset.deleteId, 10)));
+    });
+    container.querySelectorAll('[data-toggle-id]').forEach(toggle => {
+        toggle.addEventListener('change', () => toggleAvailability(parseInt(toggle.dataset.toggleId, 10), toggle.checked));
+    });
+}
+
+function renderCard(item) {
+    const img = item.image_url
+        ? `<img class="menu-card__image" src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name)}" onerror="this.src='';this.classList.add('menu-card__image--placeholder');this.textContent='🍽️';">`
+        : `<div class="menu-card__image menu-card__image--placeholder">🍽️</div>`;
+
+    return `
+        <div class="menu-card">
+            ${img}
+            <div class="menu-card__body">
+                <div class="menu-card__category">${escapeHtml(item.category)}</div>
+                <div class="menu-card__name">${escapeHtml(item.name)}</div>
+                <div class="menu-card__desc">${escapeHtml(item.description || 'No description provided.')}</div>
+                <div class="menu-card__footer">
+                    <span class="menu-card__price">${formatPrice(item.price)}</span>
+                </div>
+            </div>
+            <div class="menu-card__toggle-row">
+                <span>Available</span>
+                <label class="toggle">
+                    <input type="checkbox" data-toggle-id="${item.id}" ${parseInt(item.available) ? 'checked' : ''}>
+                    <span class="toggle__track"></span>
+                </label>
+            </div>
+            <div class="menu-card__actions">
+                <button class="btn btn--outline btn--sm" data-edit-id="${item.id}" style="flex:1;">Edit</button>
+                <button class="btn btn--danger btn--sm" data-delete-id="${item.id}" style="flex:1;">Delete</button>
+            </div>
+        </div>
+    `;
+}
+
+function openModal(item = null) {
+    document.getElementById('item-form').reset();
+    document.getElementById('item-id').value = item ? item.id : '';
+    document.getElementById('modal-title').textContent = item ? 'Edit Menu Item' : 'Add Menu Item';
+    document.getElementById('item-name').value = item ? item.name : '';
+    document.getElementById('item-description').value = item ? (item.description || '') : '';
+    document.getElementById('item-price').value = item ? item.price : '';
+    document.getElementById('item-category').value = item ? item.category : '';
+    document.getElementById('item-image').value = item ? (item.image_url || '') : '';
+    document.getElementById('item-available').checked = item ? !!parseInt(item.available) : true;
+    clearFieldErrors();
+    updateImagePreview();
+    document.getElementById('item-modal-overlay').classList.add('is-open');
+}
+
+function closeModal() {
+    document.getElementById('item-modal-overlay').classList.remove('is-open');
+}
+
+function updateImagePreview() {
+    const url = document.getElementById('item-image').value.trim();
+    const preview = document.getElementById('image-preview');
+    if (!url) { preview.innerHTML = 'No image'; return; }
+    preview.innerHTML = `<img src="${escapeHtml(url)}" alt="Preview" onerror="this.parentElement.textContent='Could not load image';">`;
+}
+
+async function saveItem(e) {
+    e.preventDefault();
+    clearFieldErrors();
+
+    const id = document.getElementById('item-id').value;
+    const name = document.getElementById('item-name').value.trim();
+    const description = document.getElementById('item-description').value.trim();
+    const price = document.getElementById('item-price').value;
+    const category = document.getElementById('item-category').value.trim();
+    const image_url = document.getElementById('item-image').value.trim();
+    const available = document.getElementById('item-available').checked ? 1 : 0;
+
+    let valid = true;
+    if (!name) { showFieldError('item-name', 'Name is required'); valid = false; }
+    if (!price || parseFloat(price) <= 0) { showFieldError('item-price', 'Enter a valid price greater than 0'); valid = false; }
+    if (!category) { showFieldError('item-category', 'Category is required'); valid = false; }
+    if (!valid) return;
+
+    const payload = { name, description, price: parseFloat(price), category, image_url, available };
+    const btn = document.getElementById('item-save-btn');
+    setButtonLoading(btn, true);
+
+    try {
+        if (id) {
+            await apiFetch(`/menu/item.php?id=${id}`, 'PUT', payload);
+            showToast('Menu item updated', 'success');
+        } else {
+            await apiFetch('/menu/index.php', 'POST', payload);
+            showToast('Menu item created', 'success');
+        }
+        closeModal();
+        await loadMenu();
+    } finally {
+        setButtonLoading(btn, false);
+    }
+}
+
+async function deleteItem(id) {
+    if (!confirm('Are you sure you want to delete this menu item?')) return;
+    try {
+        await apiFetch(`/menu/item.php?id=${id}`, 'DELETE');
+        showToast('Menu item deleted', 'success');
+        await loadMenu();
+    } catch { /* toast already shown */ }
+}
+
+async function toggleAvailability(id, checked) {
+    try {
+        await apiFetch(`/menu/item.php?id=${id}`, 'PUT', { available: checked ? 1 : 0 });
+        const item = allItems.find(i => i.id === id);
+        if (item) item.available = checked ? 1 : 0;
+        showToast(checked ? 'Item marked available' : 'Item marked unavailable', 'success');
+    } catch {
+        renderGrid();
+    }
+}
+</script>
+</body>
+</html>
